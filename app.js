@@ -647,14 +647,12 @@ function materialCandidatePoints(segment, bend, halfThickness) {
   return [];
 }
 
-function outsideEnvelopeEndpoints(index, geometry, halfThickness) {
+function faceEnvelopeEndpoints(index, geometry, halfThickness, faceSide) {
   const segment = geometry.flangeSegments[index];
   const direction = norm(sub(segment.vertexEnd, segment.vertexStart));
   const normal = perpLeft(direction);
-  const insideSide = flangeInsideSide(index, geometry);
-  const outsideSide = -insideSide;
-  const outsideFace = tangentDimensionPoint(segment.start, direction, outsideSide, halfThickness);
-  const outsideNormalProjection = dot(outsideFace, normal);
+  const face = tangentDimensionPoint(segment.start, direction, faceSide, halfThickness);
+  const faceNormalProjection = dot(face, normal);
   const candidates = [
     ...materialCandidatePoints(segment, null, halfThickness),
     ...materialCandidatePoints(null, geometry.bendData[index - 1], halfThickness),
@@ -677,9 +675,19 @@ function outsideEnvelopeEndpoints(index, geometry, halfThickness) {
   }
 
   return {
-    start: add(mul(direction, envelope.min), mul(normal, outsideNormalProjection)),
-    end: add(mul(direction, envelope.max), mul(normal, outsideNormalProjection))
+    start: add(mul(direction, envelope.min), mul(normal, faceNormalProjection)),
+    end: add(mul(direction, envelope.max), mul(normal, faceNormalProjection))
   };
+}
+
+function outsideEnvelopeEndpoints(index, geometry, halfThickness) {
+  const insideSide = flangeInsideSide(index, geometry);
+  return faceEnvelopeEndpoints(index, geometry, halfThickness, -insideSide);
+}
+
+function insideEnvelopeEndpoints(index, geometry, halfThickness) {
+  const insideSide = flangeInsideSide(index, geometry);
+  return faceEnvelopeEndpoints(index, geometry, halfThickness, insideSide);
 }
 
 function renderMaterialPieces(geometry, halfThickness) {
@@ -708,8 +716,9 @@ function renderCadDimensions(model, geometry, halfThickness) {
     const direction = norm(sub(segment.vertexEnd, segment.vertexStart));
     const insideSide = flangeInsideSide(index, geometry);
     const outsideSide = -insideSide;
-    const insideStart = tangentDimensionPoint(segment.start, direction, insideSide, halfThickness);
-    const insideEnd = tangentDimensionPoint(segment.end, direction, insideSide, halfThickness);
+    const insideEnvelope = insideEnvelopeEndpoints(index, geometry, halfThickness);
+    const insideStart = insideEnvelope.start ?? tangentDimensionPoint(segment.start, direction, insideSide, halfThickness);
+    const insideEnd = insideEnvelope.end ?? tangentDimensionPoint(segment.end, direction, insideSide, halfThickness);
     const outsideEnvelope = outsideEnvelopeEndpoints(index, geometry, halfThickness);
     const outsideStart = outsideEnvelope.start ?? tangentDimensionPoint(segment.start, direction, outsideSide, halfThickness);
     const outsideEnd = outsideEnvelope.end ?? tangentDimensionPoint(segment.end, direction, outsideSide, halfThickness);
