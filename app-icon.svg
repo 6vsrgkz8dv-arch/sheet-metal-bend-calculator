@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Sheet metal bend schematic">
+  <rect width="256" height="256" rx="48" fill="#18211f"/>
+  <path d="M48 164h72a44 44 0 0 0 44-44V76" fill="none" stroke="#9ba6a0" stroke-width="34" stroke-linecap="square"/>
+  <path d="M48 164h72a44 44 0 0 0 44-44V76" fill="none" stroke="#27c2d6" stroke-width="8" stroke-linecap="round"/>
+  <path d="M67 188h98" stroke="#edf4f1" stroke-width="8" stroke-linecap="round"/>
+  <path d="M164 58v98" stroke="#edf4f1" stroke-width="8" stroke-linecap="round"/>
+  <path d="M67 188l16-12v24zM165 188l-16-12v24zM164 58l-12 16h24zM164 156l-12-16h24z" fill="#edf4f1"/>
+  <path d="M184 78a74 74 0 0 1 0 86" fill="none" stroke="#e3895b" stroke-width="9" stroke-linecap="round"/>
+  <path d="M184 78l17 5-14 11zM184 164l17-5-14-11z" fill="#e3895b"/>
+</svg>
