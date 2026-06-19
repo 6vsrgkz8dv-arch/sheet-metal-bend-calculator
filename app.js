@@ -690,6 +690,62 @@ function insideEnvelopeEndpoints(index, geometry, halfThickness) {
   return faceEnvelopeEndpoints(index, geometry, halfThickness, insideSide);
 }
 
+function lineIntersection(pointA, directionA, pointB, directionB) {
+  const denominator = cross(directionA, directionB);
+  if (Math.abs(denominator) < 0.000001) return null;
+  const t = cross(sub(pointB, pointA), directionB) / denominator;
+  return add(pointA, mul(directionA, t));
+}
+
+function adjacentFaceIntersection(currentPoint, currentDirection, adjacentSegment, preferProjection, mode, halfThickness) {
+  if (!adjacentSegment) return null;
+  const adjacentDirection = norm(sub(adjacentSegment.vertexEnd, adjacentSegment.vertexStart));
+  const candidates = [-1, 1]
+    .map((side) => {
+      const facePoint = tangentDimensionPoint(adjacentSegment.start, adjacentDirection, side, halfThickness);
+      const intersection = lineIntersection(currentPoint, currentDirection, facePoint, adjacentDirection);
+      if (!intersection) return null;
+      return {
+        point: intersection,
+        projection: dot(intersection, currentDirection)
+      };
+    })
+    .filter(Boolean);
+
+  if (!candidates.length) return null;
+
+  const inward = candidates.filter((candidate) => (
+    mode === "start"
+      ? candidate.projection >= preferProjection - 0.01
+      : candidate.projection <= preferProjection + 0.01
+  ));
+  const pool = inward.length ? inward : candidates;
+
+  return pool.reduce((best, candidate) => {
+    const distance = Math.abs(candidate.projection - preferProjection);
+    if (!best || distance < best.distance) {
+      return { ...candidate, distance };
+    }
+    return best;
+  }, null).point;
+}
+
+function insideAdjacentFaceEndpoints(index, geometry, halfThickness) {
+  const segment = geometry.flangeSegments[index];
+  const direction = norm(sub(segment.vertexEnd, segment.vertexStart));
+  const insideSide = flangeInsideSide(index, geometry);
+  const insideFacePoint = tangentDimensionPoint(segment.start, direction, insideSide, halfThickness);
+  const currentStartProjection = dot(segment.start, direction);
+  const currentEndProjection = dot(segment.end, direction);
+  const previousSegment = geometry.flangeSegments[index - 1];
+  const nextSegment = geometry.flangeSegments[index + 1];
+
+  return {
+    start: adjacentFaceIntersection(insideFacePoint, direction, previousSegment, currentStartProjection, "start", halfThickness),
+    end: adjacentFaceIntersection(insideFacePoint, direction, nextSegment, currentEndProjection, "end", halfThickness)
+  };
+}
+
 function renderMaterialPieces(geometry, halfThickness) {
   const flanges = geometry.flangeSegments
     .map((segment) => svg("path", { class: "sheet-body", d: flangeMaterialPath(segment, halfThickness) }))
@@ -716,9 +772,10 @@ function renderCadDimensions(model, geometry, halfThickness) {
     const direction = norm(sub(segment.vertexEnd, segment.vertexStart));
     const insideSide = flangeInsideSide(index, geometry);
     const outsideSide = -insideSide;
+    const insideAdjacentFaces = insideAdjacentFaceEndpoints(index, geometry, halfThickness);
     const insideEnvelope = insideEnvelopeEndpoints(index, geometry, halfThickness);
-    const insideStart = insideEnvelope.start ?? tangentDimensionPoint(segment.start, direction, insideSide, halfThickness);
-    const insideEnd = insideEnvelope.end ?? tangentDimensionPoint(segment.end, direction, insideSide, halfThickness);
+    const insideStart = insideAdjacentFaces.start ?? insideEnvelope.start ?? tangentDimensionPoint(segment.start, direction, insideSide, halfThickness);
+    const insideEnd = insideAdjacentFaces.end ?? insideEnvelope.end ?? tangentDimensionPoint(segment.end, direction, insideSide, halfThickness);
     const outsideEnvelope = outsideEnvelopeEndpoints(index, geometry, halfThickness);
     const outsideStart = outsideEnvelope.start ?? tangentDimensionPoint(segment.start, direction, outsideSide, halfThickness);
     const outsideEnd = outsideEnvelope.end ?? tangentDimensionPoint(segment.end, direction, outsideSide, halfThickness);
