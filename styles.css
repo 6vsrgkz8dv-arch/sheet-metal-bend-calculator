@@ -488,6 +488,12 @@ svg.is-panning {
   vector-effect: non-scaling-stroke;
 }
 
+.bend-line-marker {
+  stroke: var(--accent-2);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .svg-label {
   fill: var(--ink);
   font-size: 12px;

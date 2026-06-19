@@ -668,6 +668,38 @@ function sampleArcPoints(center, startVector, endVector, radius, sweep, steps = 
   return points;
 }
 
+function bendArcMidVector(bend) {
+  const startVector = norm(sub(bend.tangentIn, bend.center));
+  const endVector = norm(sub(bend.tangentOut, bend.center));
+  const startAngle = Math.atan2(startVector.y, startVector.x);
+  const endAngle = Math.atan2(endVector.y, endVector.x);
+  let delta = endAngle - startAngle;
+  if (bend.sweep && delta < 0) delta += Math.PI * 2;
+  if (!bend.sweep && delta > 0) delta -= Math.PI * 2;
+  const midAngle = startAngle + delta / 2;
+  return point(Math.cos(midAngle), Math.sin(midAngle));
+}
+
+function bendLineMarker(bend, index, halfThickness) {
+  const midVector = bendArcMidVector(bend);
+  const innerRadius = Math.max(1, bend.radius - halfThickness);
+  const outerRadius = Math.max(1, bend.radius + halfThickness);
+  const innerPoint = add(bend.center, mul(midVector, innerRadius));
+  const outerPoint = add(bend.center, mul(midVector, outerRadius));
+  const markPoint = add(bend.center, mul(midVector, bend.radius));
+  const labelPoint = add(markPoint, mul(midVector, 22));
+
+  return svg("g", { class: "bend-mark-group" }, [
+    svg("line", { class: "bend-line-marker", x1: innerPoint.x, y1: innerPoint.y, x2: outerPoint.x, y2: outerPoint.y }),
+    svg("circle", { class: "bend-mark", cx: markPoint.x, cy: markPoint.y, r: 5 }),
+    svg("text", { class: "svg-small", x: labelPoint.x, y: labelPoint.y, "text-anchor": "middle" }, `B${index + 1}`)
+  ].join(""));
+}
+
+function bendLineMarkPoint(bend) {
+  return add(bend.center, mul(bendArcMidVector(bend), bend.radius));
+}
+
 function materialCandidatePoints(segment, bend, halfThickness) {
   if (segment) {
     const direction = norm(sub(segment.end, segment.start));
@@ -816,26 +848,20 @@ function bendLineFaceEndpoints(index, geometry, halfThickness) {
   const fallbackSide = flangeInsideSide(index, geometry);
   const previousBend = geometry.bendData[index - 1];
   const nextBend = geometry.bendData[index];
-  const previousSegment = geometry.flangeSegments[index - 1];
-  const nextSegment = geometry.flangeSegments[index + 1];
-
-  const faceIntersection = (currentVertex, currentSide, adjacentSegment) => {
-    if (!adjacentSegment) {
-      return tangentDimensionPoint(currentVertex, direction, currentSide, halfThickness);
+  const bendReferencePoint = (bend, fallbackVertex) => {
+    if (!bend) {
+      return tangentDimensionPoint(fallbackVertex, direction, fallbackSide, halfThickness);
     }
 
-    const adjacentDirection = norm(sub(adjacentSegment.vertexEnd, adjacentSegment.vertexStart));
-    const currentFacePoint = tangentDimensionPoint(currentVertex, direction, currentSide, halfThickness);
-    const adjacentFacePoint = tangentDimensionPoint(currentVertex, adjacentDirection, currentSide, halfThickness);
-    return lineIntersection(currentFacePoint, direction, adjacentFacePoint, adjacentDirection) ?? currentFacePoint;
+    const markerPoint = bendLineMarkPoint(bend);
+    const flangeNormal = perpLeft(direction);
+    const flangeNormalProjection = dot(fallbackVertex, flangeNormal);
+    return add(mul(direction, dot(markerPoint, direction)), mul(flangeNormal, flangeNormalProjection));
   };
 
-  const startSide = previousBend?.directionSign ?? fallbackSide;
-  const endSide = nextBend?.directionSign ?? fallbackSide;
-
   return {
-    start: faceIntersection(segment.vertexStart, startSide, previousSegment),
-    end: faceIntersection(segment.vertexEnd, endSide, nextSegment),
+    start: bendReferencePoint(previousBend, segment.vertexStart),
+    end: bendReferencePoint(nextBend, segment.vertexEnd),
     side: fallbackSide
   };
 }
@@ -871,10 +897,7 @@ function renderCrossSection(model) {
   const halfThickness = Math.max(drawing.minThicknessPx, state.thicknessIn * drawing.scale) / 2;
   const material = renderMaterialPieces(geometry, halfThickness);
   const neutral = svg("path", { class: "neutral-path", d: geometry.d, "stroke-width": 2 });
-  const bendMarks = geometry.bendData.map((bend, index) => svg("g", { class: "bend-mark-group" }, [
-    svg("circle", { class: "bend-mark", cx: bend.vertex.x, cy: bend.vertex.y, r: 5 }),
-    svg("text", { class: "svg-small", x: bend.vertex.x + 9, y: bend.vertex.y - 9 }, `B${index + 1}`)
-  ].join(""))).join("");
+  const bendMarks = geometry.bendData.map((bend, index) => bendLineMarker(bend, index, halfThickness)).join("");
   const angles = geometry.bendData.map(bendAngleAnnotation).join("");
   const dimensions = renderCadDimensions(model, geometry, halfThickness);
   const bounds = boundsForSvg([
@@ -969,6 +992,7 @@ function cloneSvgForExport(sourceSvg) {
     .bendline-dimension .dimension-line { stroke: #18211f; }
     .dim-line { stroke: #18211f; stroke-width: 1.2; }
     .guide-line { stroke: #9eaaa6; stroke-dasharray: 4 5; stroke-width: 1; }
+    .bend-line-marker { stroke: #c7693d; stroke-width: 2; vector-effect: non-scaling-stroke; }
     .bend-mark { fill: #c7693d; stroke: white; stroke-width: 2; vector-effect: non-scaling-stroke; }
     .svg-label { fill: #18211f; font-size: 12px; font-weight: 700; }
     .svg-small { fill: #5f6d68; font-size: 11px; }
