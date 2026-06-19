@@ -104,23 +104,63 @@ function adjacentOffsets(index) {
   };
 }
 
-function flangeDims(flange, index) {
+function bendDirectionSign(incoming, outgoing) {
+  return cross(incoming, outgoing) >= 0 ? 1 : -1;
+}
+
+function flangeDirections() {
+  let heading = 0;
+  return state.flanges.map((flange, index) => {
+    const direction = point(Math.cos(heading), -Math.sin(heading));
+    if (index < state.flanges.length - 1) {
+      const turn = Math.PI - flange.angle * Math.PI / 180;
+      heading += (flange.direction === "up" ? 1 : -1) * turn;
+    }
+    return direction;
+  });
+}
+
+function bendLineFaceDelta(index, directions) {
+  const currentDirection = directions[index];
+  const halfThickness = state.thicknessIn / 2;
+  const previousDirection = directions[index - 1];
+  const nextDirection = directions[index + 1];
+  const previousSide = previousDirection ? bendDirectionSign(previousDirection, currentDirection) : null;
+  const nextSide = nextDirection ? bendDirectionSign(currentDirection, nextDirection) : null;
+
+  const endpointDelta = (side, adjacentDirection) => {
+    if (!adjacentDirection) return 0;
+    const currentFacePoint = mul(perpLeft(currentDirection), side * halfThickness);
+    const adjacentFacePoint = mul(perpLeft(adjacentDirection), side * halfThickness);
+    const intersection = lineIntersection(currentFacePoint, currentDirection, adjacentFacePoint, adjacentDirection);
+    return intersection ? dot(intersection, currentDirection) : 0;
+  };
+
+  const startDelta = endpointDelta(previousSide, previousDirection);
+  const endDelta = endpointDelta(nextSide, nextDirection);
+  return endDelta - startDelta;
+}
+
+function flangeDims(flange, index, directions) {
   const offsets = adjacentOffsets(index);
-  let bendLine = Math.max(0.01, flange.lengthIn);
-  if (flange.lengthType === "inside") bendLine = flange.lengthIn + offsets.inside;
-  if (flange.lengthType === "outside") bendLine = Math.max(0.01, flange.lengthIn - offsets.outside);
+  const faceDelta = bendLineFaceDelta(index, directions);
+  let apexLength = Math.max(0.01, flange.lengthIn - faceDelta);
+  if (flange.lengthType === "inside") apexLength = flange.lengthIn + offsets.inside;
+  if (flange.lengthType === "outside") apexLength = Math.max(0.01, flange.lengthIn - offsets.outside);
+  const bendLine = Math.max(0, apexLength + faceDelta);
 
   return {
     bendLine,
-    inside: Math.max(0, bendLine - offsets.inside),
-    outside: bendLine + offsets.outside,
-    neutral: bendLine,
+    inside: Math.max(0, apexLength - offsets.inside),
+    outside: apexLength + offsets.outside,
+    neutral: apexLength,
     offsets
   };
 }
 
 function calculateModel() {
-  const flangeData = state.flanges.map(flangeDims);
+  const directions = flangeDirections();
+  const flangeData = state.flanges.map((flange, index) => flangeDims(flange, index, directions));
   const bends = state.flanges.slice(0, -1).map((flange, index) => ({
     ...bendMath(flange.angle),
     direction: flange.direction,
@@ -524,18 +564,22 @@ function arrowHead(tip, direction, size = 13, spread = 7) {
   return `${tip.x.toFixed(2)},${tip.y.toFixed(2)} ${a.x.toFixed(2)},${a.y.toFixed(2)} ${b.x.toFixed(2)},${b.y.toFixed(2)}`;
 }
 
-function dimensionLine(label, start, end, className, type, index, defaultOffset) {
-  const direction = norm(sub(end, start));
+function dimensionLine(label, start, end, className, type, index, defaultOffset, axisDirection = null) {
+  const direction = norm(axisDirection ?? sub(end, start));
   const normal = perpLeft(direction);
   const key = dimensionKey(type, index);
   const offset = getDimensionOffset(key, type, defaultOffset);
-  const dimStart = add(start, mul(normal, offset));
-  const dimEnd = add(end, mul(normal, offset));
+  const startProjection = dot(start, direction);
+  const endProjection = dot(end, direction);
+  const normalProjection = (dot(start, normal) + dot(end, normal)) / 2;
+  const dimStart = add(mul(direction, startProjection), mul(normal, normalProjection + offset));
+  const dimEnd = add(mul(direction, endProjection), mul(normal, normalProjection + offset));
   const mid = mul(add(dimStart, dimEnd), 0.5);
   const angle = Math.atan2(dimEnd.y - dimStart.y, dimEnd.x - dimStart.x) * 180 / Math.PI;
   const textAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
-  const extA = add(start, mul(normal, offset + (offset >= 0 ? 10 : -10)));
-  const extB = add(end, mul(normal, offset + (offset >= 0 ? 10 : -10)));
+  const extensionOffset = offset + (offset >= 0 ? 10 : -10);
+  const extA = add(mul(direction, startProjection), mul(normal, normalProjection + extensionOffset));
+  const extB = add(mul(direction, endProjection), mul(normal, normalProjection + extensionOffset));
 
   return svg("g", {
     class: `dimension ${className}`,
@@ -766,6 +810,36 @@ function flangeInsideSide(index, geometry) {
   return nextBend?.directionSign ?? prevBend?.directionSign ?? 1;
 }
 
+function bendLineFaceEndpoints(index, geometry, halfThickness) {
+  const segment = geometry.flangeSegments[index];
+  const direction = norm(sub(segment.vertexEnd, segment.vertexStart));
+  const fallbackSide = flangeInsideSide(index, geometry);
+  const previousBend = geometry.bendData[index - 1];
+  const nextBend = geometry.bendData[index];
+  const previousSegment = geometry.flangeSegments[index - 1];
+  const nextSegment = geometry.flangeSegments[index + 1];
+
+  const faceIntersection = (currentVertex, currentSide, adjacentSegment) => {
+    if (!adjacentSegment) {
+      return tangentDimensionPoint(currentVertex, direction, currentSide, halfThickness);
+    }
+
+    const adjacentDirection = norm(sub(adjacentSegment.vertexEnd, adjacentSegment.vertexStart));
+    const currentFacePoint = tangentDimensionPoint(currentVertex, direction, currentSide, halfThickness);
+    const adjacentFacePoint = tangentDimensionPoint(currentVertex, adjacentDirection, currentSide, halfThickness);
+    return lineIntersection(currentFacePoint, direction, adjacentFacePoint, adjacentDirection) ?? currentFacePoint;
+  };
+
+  const startSide = previousBend?.directionSign ?? fallbackSide;
+  const endSide = nextBend?.directionSign ?? fallbackSide;
+
+  return {
+    start: faceIntersection(segment.vertexStart, startSide, previousSegment),
+    end: faceIntersection(segment.vertexEnd, endSide, nextSegment),
+    side: fallbackSide
+  };
+}
+
 function renderCadDimensions(model, geometry, halfThickness) {
   return geometry.flangeSegments.map((segment, index) => {
     const flange = model.flangeData[index];
@@ -779,13 +853,14 @@ function renderCadDimensions(model, geometry, halfThickness) {
     const outsideEnvelope = outsideEnvelopeEndpoints(index, geometry, halfThickness);
     const outsideStart = outsideEnvelope.start ?? tangentDimensionPoint(segment.start, direction, outsideSide, halfThickness);
     const outsideEnd = outsideEnvelope.end ?? tangentDimensionPoint(segment.end, direction, outsideSide, halfThickness);
+    const bendLineFace = bendLineFaceEndpoints(index, geometry, halfThickness);
     const insideOffset = insideSide * 34;
     const outsideOffset = outsideSide * 128;
-    const bendLineOffset = insideSide * 64;
+    const bendLineOffset = bendLineFace.side * 64;
     const parts = [
-      dimensionLine(`BL ${format(flange.bendLine)}`, segment.vertexStart, segment.vertexEnd, "bendline-dimension", "bendLine", index, bendLineOffset),
-      dimensionLine(`IN ${format(flange.inside)}`, insideStart, insideEnd, "inside-dimension", "inside", index, insideOffset),
-      dimensionLine(`OUT ${format(flange.outside)}`, outsideStart, outsideEnd, "outside-dimension", "outside", index, outsideOffset)
+      dimensionLine(`BL ${format(flange.bendLine)}`, bendLineFace.start, bendLineFace.end, "bendline-dimension", "bendLine", index, bendLineOffset, direction),
+      dimensionLine(`IN ${format(flange.inside)}`, insideStart, insideEnd, "inside-dimension", "inside", index, insideOffset, direction),
+      dimensionLine(`OUT ${format(flange.outside)}`, outsideStart, outsideEnd, "outside-dimension", "outside", index, outsideOffset, direction)
     ];
     return parts.join("");
   }).join("");
