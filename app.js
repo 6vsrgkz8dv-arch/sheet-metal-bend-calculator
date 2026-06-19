@@ -519,6 +519,9 @@ function boundsForSvg(items, padding = 120) {
     ys.push(value.y);
   };
   collect(items);
+  if (!xs.length || !ys.length) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
@@ -529,6 +532,34 @@ function boundsForSvg(items, padding = 120) {
     width: Math.max(1, maxX - minX + padding * 2),
     height: Math.max(1, maxY - minY + padding * 2)
   };
+}
+
+function pointsFromSvgMarkup(markup) {
+  const points = [];
+  const pairedAttributes = [
+    ["x", "y"],
+    ["x1", "y1"],
+    ["x2", "y2"],
+    ["cx", "cy"]
+  ];
+
+  pairedAttributes.forEach(([xAttr, yAttr]) => {
+    const pattern = new RegExp(`${xAttr}="([^"]+)"[^>]*${yAttr}="([^"]+)"`, "g");
+    [...markup.matchAll(pattern)].forEach((match) => {
+      const x = Number(match[1]);
+      const y = Number(match[2]);
+      if (Number.isFinite(x) && Number.isFinite(y)) points.push(point(x, y));
+    });
+  });
+
+  [...markup.matchAll(/points="([^"]+)"/g)].forEach((match) => {
+    match[1].trim().split(/\s+/).forEach((pair) => {
+      const [x, y] = pair.split(",").map(Number);
+      if (Number.isFinite(x) && Number.isFinite(y)) points.push(point(x, y));
+    });
+  });
+
+  return points;
 }
 
 function setViewportBounds(key, bounds) {
@@ -900,11 +931,13 @@ function renderCrossSection(model) {
   const bendMarks = geometry.bendData.map((bend, index) => bendLineMarker(bend, index, halfThickness)).join("");
   const angles = geometry.bendData.map(bendAngleAnnotation).join("");
   const dimensions = renderCadDimensions(model, geometry, halfThickness);
+  const annotationPoints = pointsFromSvgMarkup(`${dimensions}${angles}${bendMarks}`);
   const bounds = boundsForSvg([
     geometry.vertices,
     geometry.bendData.flatMap((bend) => [bend.center, bend.tangentIn, bend.tangentOut]),
-    geometry.flangeSegments.flatMap((segment) => [segment.start, segment.end, segment.vertexStart, segment.vertexEnd])
-  ], 320);
+    geometry.flangeSegments.flatMap((segment) => [segment.start, segment.end, segment.vertexStart, segment.vertexEnd]),
+    annotationPoints
+  ], 90);
 
   els.crossSection.innerHTML = [
     crossSectionDefs(),
